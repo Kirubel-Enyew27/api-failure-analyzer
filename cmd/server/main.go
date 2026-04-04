@@ -17,6 +17,9 @@ func main() {
 	logHandler := handler.NewHandler(logService)
 
 	http.HandleFunc("/logs", logHandler.SubmitLog)
+	http.HandleFunc("/errors/summary-time", logHandler.GetErrorSummaryByTime)
+	http.HandleFunc("/errors/top-limit", logHandler.GetTopErrorsWithLimit)
+	http.HandleFunc("/errors/details-fp", logHandler.GetErrorDetailsByFingerprint)
 
 	log.Println("Server running on :8080")
 	log.Fatal(http.ListenAndServe(":8080", nil))
