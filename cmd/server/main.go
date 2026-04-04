@@ -7,6 +7,7 @@ import (
 	"api-failure-analyzer/internal/logger"
 	"api-failure-analyzer/internal/middleware"
 	"api-failure-analyzer/internal/repository"
+	"api-failure-analyzer/internal/retention"
 	"api-failure-analyzer/internal/service"
 	"context"
 	"net/http"
@@ -42,6 +43,15 @@ func main() {
 	}
 	notifier := alert.NewNotifier(alertCfg)
 	notifier.Start(context.Background())
+
+	retentionCfg := retention.Config{
+		LogRetentionDays:     mustGetInt("LOG_RETENTION_DAYS", 30),
+		ErrorRetentionDays:   mustGetInt("ERROR_RETENTION_DAYS", 90),
+		ClusterRetentionDays: mustGetInt("CLUSTER_RETENTION_DAYS", 180),
+		ArchiveEnabled:       os.Getenv("ARCHIVE_ENABLED") == "true",
+		ArchiveBeforeDelete:  true,
+	}
+	retention.StartRetentionScheduler(context.Background(), retentionCfg, 24*time.Hour)
 
 	rateLimiter := middleware.NewRateLimiter(100, 200, time.Minute)
 
