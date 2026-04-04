@@ -27,7 +27,7 @@ func (h *Handler) SubmitLog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := h.service.ProcessLog(req.Log)
+	err := h.service.ProcessLog(r.Context(), req.Log)
 	if err != nil {
 		http.Error(w, "failed to process log", http.StatusInternalServerError)
 		return
@@ -48,7 +48,7 @@ func (h *Handler) GetErrorSummaryByTime(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	summary, err := h.service.GetErrorSummaryByTime(start, end)
+	summary, err := h.service.GetErrorSummaryByTime(r.Context(), start, end)
 	if err != nil {
 		http.Error(w, "failed to get error summary", http.StatusInternalServerError)
 		return
@@ -65,7 +65,7 @@ func (h *Handler) GetTopErrorsWithLimit(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	topErrors, err := h.service.GetTopErrorsWithLimit(limit)
+	topErrors, err := h.service.GetTopErrorsWithLimit(r.Context(), limit)
 	if err != nil {
 		http.Error(w, "failed to get top errors", http.StatusInternalServerError)
 		return
@@ -82,7 +82,7 @@ func (h *Handler) GetErrorDetailsByFingerprint(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	details, err := h.service.GetErrorDetailsByFingerprint(fingerprint)
+	details, err := h.service.GetErrorDetailsByFingerprint(r.Context(), fingerprint)
 	if err != nil {
 		http.Error(w, "failed to get error details", http.StatusInternalServerError)
 		return

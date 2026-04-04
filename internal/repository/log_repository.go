@@ -12,30 +12,37 @@ func NewLogRepository() *LogRepository {
 	return &LogRepository{}
 }
 
-func (r *LogRepository) SaveLog(raw string) (string, error) {
-	var id string
-	err := db.DB.QueryRow(context.Background(),
-		"INSERT INTO logs (raw_text) VALUES ($1) RETURNING id", raw).Scan(&id)
-	return id, err
-}
+func (r *LogRepository) ProcessLogWithTx(ctx context.Context, raw, msg, typ, fp string) error {
+	tx, err := db.DB.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
 
-func (r *LogRepository) SaveError(logID, msg, typ, fp string) error {
-	_, err := db.DB.Exec(context.Background(),
-		"INSERT INTO errors (log_id, error_message, error_type, fingerprint) VALUES ($1, $2, $3, $4)",
-		logID, msg, typ, fp)
-	return err
-}
+	var logID string
+	err = tx.QueryRow(ctx, "INSERT INTO logs (raw_text) VALUES ($1) RETURNING id", raw).Scan(&logID)
+	if err != nil {
+		return err
+	}
 
-func (r *LogRepository) UpsertCluster(fp, typ string) error {
-	_, err := db.DB.Exec(context.Background(), `
+	_, err = tx.Exec(ctx, "INSERT INTO errors (log_id, error_message, error_type, fingerprint) VALUES ($1, $2, $3, $4)", logID, msg, typ, fp)
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.Exec(ctx, `
 		INSERT INTO clusters (fingerprint, error_type, count)
 		VALUES ($1, $2, 1)
 		ON CONFLICT (fingerprint) DO UPDATE SET count = clusters.count + 1, last_seen = NOW()
 	`, fp, typ)
-	return err
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
 }
 
-func (r *LogRepository) GetErrorSummaryWithTime(start, end string) (map[string]int, error) {
+func (r *LogRepository) GetErrorSummaryWithTime(ctx context.Context, start, end string) (map[string]int, error) {
 	query := `
 	SELECT error_type, COUNT(*) 
 	FROM errors
@@ -43,7 +50,7 @@ func (r *LogRepository) GetErrorSummaryWithTime(start, end string) (map[string]i
 	GROUP BY error_type
 	`
 
-	rows, err := db.DB.Query(context.Background(), query, start, end)
+	rows, err := db.DB.Query(ctx, query, start, end)
 	if err != nil {
 		return nil, err
 	}
@@ -61,8 +68,8 @@ func (r *LogRepository) GetErrorSummaryWithTime(start, end string) (map[string]i
 	return summary, nil
 }
 
-func (r *LogRepository) GetTopErrorsWithLimit(limit int) ([]map[string]interface{}, error) {
-	rows, err := db.DB.Query(context.Background(), `	
+func (r *LogRepository) GetTopErrorsWithLimit(ctx context.Context, limit int) ([]map[string]interface{}, error) {
+	rows, err := db.DB.Query(ctx, `	
 	SELECT fingerprint, error_type, count, last_seen
 	FROM clusters
 	ORDER BY count DESC
@@ -92,8 +99,8 @@ func (r *LogRepository) GetTopErrorsWithLimit(limit int) ([]map[string]interface
 	return results, nil
 }
 
-func (r *LogRepository) GetErrorDetailsByFingerprint(fingerprint string) ([]map[string]interface{}, error) {
-	rows, err := db.DB.Query(context.Background(), `
+func (r *LogRepository) GetErrorDetailsByFingerprint(ctx context.Context, fingerprint string) ([]map[string]interface{}, error) {
+	rows, err := db.DB.Query(ctx, `
 	SELECT log_id, error_message, error_type, created_at
 	FROM errors
 	WHERE fingerprint = $1
