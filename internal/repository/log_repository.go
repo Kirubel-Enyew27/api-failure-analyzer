@@ -12,6 +12,12 @@ func NewLogRepository() *LogRepository {
 	return &LogRepository{}
 }
 
+func (r *LogRepository) GetClusterCount(ctx context.Context) (int, error) {
+	var count int
+	err := db.DB.QueryRow(ctx, "SELECT COUNT(*) FROM clusters").Scan(&count)
+	return count, err
+}
+
 func (r *LogRepository) ProcessLogWithTx(ctx context.Context, raw, msg, typ, fp string) error {
 	tx, err := db.DB.Begin(ctx)
 	if err != nil {
@@ -119,10 +125,10 @@ func (r *LogRepository) GetErrorDetailsByFingerprint(ctx context.Context, finger
 			return nil, err
 		}
 		details = append(details, map[string]interface{}{
-			"log_id": logID,
+			"log_id":        logID,
 			"error_message": msg,
-			"error_type": typ,
-			"created_at": createdAt,
+			"error_type":    typ,
+			"created_at":    createdAt,
 		})
 	}
 	return details, nil

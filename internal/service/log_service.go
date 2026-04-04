@@ -2,8 +2,10 @@ package service
 
 import (
 	"api-failure-analyzer/internal/analyzer"
+	"api-failure-analyzer/internal/metrics"
 	"api-failure-analyzer/internal/repository"
 	"context"
+	"time"
 )
 
 type LogService struct {
@@ -17,8 +19,21 @@ func NewLogService(repo *repository.LogRepository) *LogService {
 }
 
 func (s *LogService) ProcessLog(ctx context.Context, raw string) error {
+	start := time.Now()
 	res := analyzer.AnalyzeLog(raw)
-	return s.repo.ProcessLogWithTx(ctx, raw, res.ErrorMessage, res.ErrorType, res.Fingerprint)
+	err := s.repo.ProcessLogWithTx(ctx, raw, res.ErrorMessage, res.ErrorType, res.Fingerprint)
+
+	metrics.ProcessedLogs.Inc()
+	if res.ErrorType != "" {
+		metrics.ErrorCount.WithLabelValues(res.ErrorType).Inc()
+	}
+
+	count, _ := s.repo.GetClusterCount(ctx)
+	metrics.ClusterCount.Set(float64(count))
+
+	metrics.ProcessingDuration.Observe(time.Since(start).Seconds())
+
+	return err
 }
 
 func (s *LogService) GetErrorSummaryByTime(ctx context.Context, start, end string) (map[string]int, error) {

@@ -9,10 +9,13 @@ import (
 	"api-failure-analyzer/internal/service"
 	"context"
 	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func main() {
@@ -32,6 +35,7 @@ func main() {
 	mux.HandleFunc("/errors/summary-time", logHandler.GetErrorSummaryByTime)
 	mux.HandleFunc("/errors/top-limit", logHandler.GetTopErrorsWithLimit)
 	mux.HandleFunc("/errors/details-fp", logHandler.GetErrorDetailsByFingerprint)
+	mux.Handle("/metrics", promhttp.Handler())
 
 	handler := middleware.RateLimiterMiddleware(rateLimiter)(mux)
 	handler = middleware.LoggingMiddleware(handler)
