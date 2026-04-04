@@ -33,12 +33,19 @@ func NewRateLimiter(rate int, burst int, window time.Duration) *RateLimiter {
 
 func (rl *RateLimiter) cleanup() {
 	ticker := time.NewTicker(rl.window)
+	defer ticker.Stop()
+
 	for range ticker.C {
 		rl.mu.Lock()
+		expired := make([]string, 0)
+		now := time.Now()
 		for ip, cl := range rl.clients {
-			if time.Since(cl.lastReset) > rl.window*2 {
-				delete(rl.clients, ip)
+			if now.Sub(cl.lastReset) > rl.window*2 {
+				expired = append(expired, ip)
 			}
+		}
+		for _, ip := range expired {
+			delete(rl.clients, ip)
 		}
 		rl.mu.Unlock()
 	}

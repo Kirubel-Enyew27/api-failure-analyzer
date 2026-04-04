@@ -93,9 +93,8 @@ func (n *Notifier) checkAlerts(ctx context.Context) {
 			continue
 		}
 
-		if count >= rule.Threshold && n.canAlert(rule.Severity, rule.Cooldown) {
+		if count >= rule.Threshold && n.shouldRecordAndAlert(rule.Severity, rule.Cooldown) {
 			n.sendAlert(rule.Severity, count, rule.Window)
-			n.recordAlert(rule.Severity)
 		}
 	}
 }
@@ -126,6 +125,19 @@ func (n *Notifier) recordAlert(severity string) {
 	alertState.mu.Lock()
 	defer alertState.mu.Unlock()
 	alertState.lastAlert[severity] = time.Now()
+}
+
+func (n *Notifier) shouldRecordAndAlert(severity string, cooldown time.Duration) bool {
+	alertState.mu.Lock()
+	defer alertState.mu.Unlock()
+
+	now := time.Now()
+	last, exists := alertState.lastAlert[severity]
+	if exists && now.Sub(last) < cooldown {
+		return false
+	}
+	alertState.lastAlert[severity] = now
+	return true
 }
 
 func (n *Notifier) sendAlert(severity string, count int, window time.Duration) {
