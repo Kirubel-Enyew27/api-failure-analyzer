@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"api-failure-analyzer/internal/app"
 	"api-failure-analyzer/internal/service"
 	"encoding/json"
 	"net/http"
@@ -20,14 +21,19 @@ type Request struct {
 }
 
 func (h *Handler) SubmitLog(w http.ResponseWriter, r *http.Request) {
-	var req Request
+	appID := r.Context().Value("app_id")
+	if appID == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
 
+	var req Request
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
 
-	err := h.service.ProcessLog(r.Context(), req.Log)
+	err := h.service.ProcessLog(r.Context(), appID.(string), req.Log)
 	if err != nil {
 		http.Error(w, "failed to process log", http.StatusInternalServerError)
 		return
@@ -40,6 +46,12 @@ func (h *Handler) SubmitLog(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) GetErrorSummaryByTime(w http.ResponseWriter, r *http.Request) {
+	appID := r.Context().Value("app_id")
+	if appID == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	start := r.URL.Query().Get("start")
 	end := r.URL.Query().Get("end")
 
@@ -48,7 +60,7 @@ func (h *Handler) GetErrorSummaryByTime(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	summary, err := h.service.GetErrorSummaryByTime(r.Context(), start, end)
+	summary, err := h.service.GetErrorSummaryByTime(r.Context(), appID.(string), start, end)
 	if err != nil {
 		http.Error(w, "failed to get error summary", http.StatusInternalServerError)
 		return
@@ -58,6 +70,12 @@ func (h *Handler) GetErrorSummaryByTime(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *Handler) GetTopErrorsWithLimit(w http.ResponseWriter, r *http.Request) {
+	appID := r.Context().Value("app_id")
+	if appID == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	limitStr := r.URL.Query().Get("limit")
 	limit, err := strconv.Atoi(limitStr)
 	if err != nil {
@@ -65,7 +83,7 @@ func (h *Handler) GetTopErrorsWithLimit(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	topErrors, err := h.service.GetTopErrorsWithLimit(r.Context(), limit)
+	topErrors, err := h.service.GetTopErrorsWithLimit(r.Context(), appID.(string), limit)
 	if err != nil {
 		http.Error(w, "failed to get top errors", http.StatusInternalServerError)
 		return
@@ -76,13 +94,19 @@ func (h *Handler) GetTopErrorsWithLimit(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *Handler) GetErrorDetailsByFingerprint(w http.ResponseWriter, r *http.Request) {
+	appID := r.Context().Value("app_id")
+	if appID == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	fingerprint := r.URL.Query().Get("fingerprint")
 	if fingerprint == "" {
 		http.Error(w, "missing fingerprint", http.StatusBadRequest)
 		return
 	}
 
-	details, err := h.service.GetErrorDetailsByFingerprint(r.Context(), fingerprint)
+	details, err := h.service.GetErrorDetailsByFingerprint(r.Context(), appID.(string), fingerprint)
 	if err != nil {
 		http.Error(w, "failed to get error details", http.StatusInternalServerError)
 		return
@@ -93,6 +117,12 @@ func (h *Handler) GetErrorDetailsByFingerprint(w http.ResponseWriter, r *http.Re
 }
 
 func (h *Handler) GetErrorTrends(w http.ResponseWriter, r *http.Request) {
+	appID := r.Context().Value("app_id")
+	if appID == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	errorType := r.URL.Query().Get("error_type")
 	intervalType := r.URL.Query().Get("interval")
 	hoursStr := r.URL.Query().Get("hours")
@@ -112,9 +142,9 @@ func (h *Handler) GetErrorTrends(w http.ResponseWriter, r *http.Request) {
 
 	var trends interface{}
 	if errorType == "" {
-		trends, err = h.service.GetAllErrorTrends(r.Context(), intervalType, hours)
+		trends, err = h.service.GetAllErrorTrends(r.Context(), appID.(string), intervalType, hours)
 	} else {
-		trends, err = h.service.GetErrorTrends(r.Context(), errorType, intervalType, hours)
+		trends, err = h.service.GetErrorTrends(r.Context(), appID.(string), errorType, intervalType, hours)
 	}
 	if err != nil {
 		http.Error(w, "failed to get error trends", http.StatusInternalServerError)
@@ -126,13 +156,19 @@ func (h *Handler) GetErrorTrends(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) GetErrorsBySeverity(w http.ResponseWriter, r *http.Request) {
+	appID := r.Context().Value("app_id")
+	if appID == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	severity := r.URL.Query().Get("severity")
 	if severity == "" {
 		http.Error(w, "missing severity", http.StatusBadRequest)
 		return
 	}
 
-	errors, err := h.service.GetErrorsBySeverity(r.Context(), severity)
+	errors, err := h.service.GetErrorsBySeverity(r.Context(), appID.(string), severity)
 	if err != nil {
 		http.Error(w, "failed to get errors by severity", http.StatusInternalServerError)
 		return
@@ -143,7 +179,13 @@ func (h *Handler) GetErrorsBySeverity(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) GetAllErrorsGroupedBySeverity(w http.ResponseWriter, r *http.Request) {
-	errors, err := h.service.GetAllErrorsGroupedBySeverity(r.Context())
+	appID := r.Context().Value("app_id")
+	if appID == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	errors, err := h.service.GetAllErrorsGroupedBySeverity(r.Context(), appID.(string))
 	if err != nil {
 		http.Error(w, "failed to get errors grouped by severity", http.StatusInternalServerError)
 		return
@@ -151,4 +193,45 @@ func (h *Handler) GetAllErrorsGroupedBySeverity(w http.ResponseWriter, r *http.R
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(errors)
+}
+
+type CreateAppRequest struct {
+	Name string `json:"name"`
+}
+
+func (h *Handler) CreateApp(w http.ResponseWriter, r *http.Request) {
+	var req CreateAppRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+
+	if req.Name == "" {
+		http.Error(w, "missing name", http.StatusBadRequest)
+		return
+	}
+
+	app, err := app.CreateApp(r.Context(), req.Name)
+	if err != nil {
+		http.Error(w, "failed to create app", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"id":      app.ID,
+		"name":    app.Name,
+		"api_key": app.APIKey,
+	})
+}
+
+func (h *Handler) ListApps(w http.ResponseWriter, r *http.Request) {
+	apps, err := app.ListApps(r.Context())
+	if err != nil {
+		http.Error(w, "failed to list apps", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(apps)
 }

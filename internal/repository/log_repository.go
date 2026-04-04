@@ -12,13 +12,13 @@ func NewLogRepository() *LogRepository {
 	return &LogRepository{}
 }
 
-func (r *LogRepository) GetClusterCount(ctx context.Context) (int, error) {
+func (r *LogRepository) GetClusterCount(ctx context.Context, appID string) (int, error) {
 	var count int
-	err := db.DB.QueryRow(ctx, "SELECT COUNT(*) FROM clusters").Scan(&count)
+	err := db.DB.QueryRow(ctx, "SELECT COUNT(*) FROM clusters WHERE app_id = $1", appID).Scan(&count)
 	return count, err
 }
 
-func (r *LogRepository) ProcessLogWithTx(ctx context.Context, raw, msg, typ, fp, severity string) error {
+func (r *LogRepository) ProcessLogWithTx(ctx context.Context, appID, raw, msg, typ, fp, severity string) error {
 	tx, err := db.DB.Begin(ctx)
 	if err != nil {
 		return err
@@ -26,21 +26,21 @@ func (r *LogRepository) ProcessLogWithTx(ctx context.Context, raw, msg, typ, fp,
 	defer tx.Rollback(ctx)
 
 	var logID string
-	err = tx.QueryRow(ctx, "INSERT INTO logs (raw_text) VALUES ($1) RETURNING id", raw).Scan(&logID)
+	err = tx.QueryRow(ctx, "INSERT INTO logs (app_id, raw_text) VALUES ($1, $2) RETURNING id", appID, raw).Scan(&logID)
 	if err != nil {
 		return err
 	}
 
-	_, err = tx.Exec(ctx, "INSERT INTO errors (log_id, error_message, error_type, fingerprint) VALUES ($1, $2, $3, $4)", logID, msg, typ, fp)
+	_, err = tx.Exec(ctx, "INSERT INTO errors (log_id, app_id, error_message, error_type, fingerprint) VALUES ($1, $2, $3, $4, $5)", logID, appID, msg, typ, fp)
 	if err != nil {
 		return err
 	}
 
 	_, err = tx.Exec(ctx, `
-		INSERT INTO clusters (fingerprint, error_type, count, severity)
-		VALUES ($1, $2, 1, $3)
-		ON CONFLICT (fingerprint) DO UPDATE SET count = clusters.count + 1, last_seen = NOW(), severity = $3
-	`, fp, typ, severity)
+		INSERT INTO clusters (app_id, fingerprint, error_type, count, severity)
+		VALUES ($1, $2, $3, 1, $4)
+		ON CONFLICT (app_id, fingerprint) DO UPDATE SET count = clusters.count + 1, last_seen = NOW(), severity = $4
+	`, appID, fp, typ, severity)
 	if err != nil {
 		return err
 	}
@@ -48,15 +48,15 @@ func (r *LogRepository) ProcessLogWithTx(ctx context.Context, raw, msg, typ, fp,
 	return tx.Commit(ctx)
 }
 
-func (r *LogRepository) GetErrorSummaryWithTime(ctx context.Context, start, end string) (map[string]int, error) {
+func (r *LogRepository) GetErrorSummaryWithTime(ctx context.Context, appID, start, end string) (map[string]int, error) {
 	query := `
 	SELECT error_type, COUNT(*) 
 	FROM errors
-	WHERE created_at >= $1 AND created_at <= $2
+	WHERE app_id = $1 AND created_at >= $2 AND created_at <= $3
 	GROUP BY error_type
 	`
 
-	rows, err := db.DB.Query(ctx, query, start, end)
+	rows, err := db.DB.Query(ctx, query, appID, start, end)
 	if err != nil {
 		return nil, err
 	}
@@ -74,13 +74,14 @@ func (r *LogRepository) GetErrorSummaryWithTime(ctx context.Context, start, end 
 	return summary, nil
 }
 
-func (r *LogRepository) GetTopErrorsWithLimit(ctx context.Context, limit int) ([]map[string]interface{}, error) {
-	rows, err := db.DB.Query(ctx, `	
-	SELECT fingerprint, error_type, count, last_seen
-	FROM clusters
-	ORDER BY count DESC
-	LIMIT $1
-	`, limit)
+func (r *LogRepository) GetTopErrorsWithLimit(ctx context.Context, appID string, limit int) ([]map[string]interface{}, error) {
+	rows, err := db.DB.Query(ctx, `
+		SELECT fingerprint, error_type, count, last_seen
+		FROM clusters
+		WHERE app_id = $1
+		ORDER BY count DESC
+		LIMIT $2
+	`, appID, limit)
 
 	if err != nil {
 		return nil, err
@@ -105,13 +106,13 @@ func (r *LogRepository) GetTopErrorsWithLimit(ctx context.Context, limit int) ([
 	return results, nil
 }
 
-func (r *LogRepository) GetErrorsBySeverity(ctx context.Context, severity string) ([]map[string]interface{}, error) {
+func (r *LogRepository) GetErrorsBySeverity(ctx context.Context, appID, severity string) ([]map[string]interface{}, error) {
 	rows, err := db.DB.Query(ctx, `
 		SELECT fingerprint, error_type, count, last_seen, severity
 		FROM clusters
-		WHERE severity = $1
+		WHERE app_id = $1 AND severity = $2
 		ORDER BY count DESC
-	`, severity)
+	`, appID, severity)
 	if err != nil {
 		return nil, err
 	}
@@ -136,12 +137,13 @@ func (r *LogRepository) GetErrorsBySeverity(ctx context.Context, severity string
 	return results, nil
 }
 
-func (r *LogRepository) GetAllErrorsGroupedBySeverity(ctx context.Context) (map[string][]map[string]interface{}, error) {
+func (r *LogRepository) GetAllErrorsGroupedBySeverity(ctx context.Context, appID string) (map[string][]map[string]interface{}, error) {
 	rows, err := db.DB.Query(ctx, `
 		SELECT fingerprint, error_type, count, last_seen, severity
 		FROM clusters
+		WHERE app_id = $1
 		ORDER BY severity DESC, count DESC
-	`)
+	`, appID)
 	if err != nil {
 		return nil, err
 	}
@@ -172,13 +174,13 @@ func (r *LogRepository) GetAllErrorsGroupedBySeverity(ctx context.Context) (map[
 	return result, nil
 }
 
-func (r *LogRepository) GetErrorDetailsByFingerprint(ctx context.Context, fingerprint string) ([]map[string]interface{}, error) {
+func (r *LogRepository) GetErrorDetailsByFingerprint(ctx context.Context, appID, fingerprint string) ([]map[string]interface{}, error) {
 	rows, err := db.DB.Query(ctx, `
-	SELECT log_id, error_message, error_type, created_at
-	FROM errors
-	WHERE fingerprint = $1
-	ORDER BY created_at DESC
-	`, fingerprint)
+		SELECT log_id, error_message, error_type, created_at
+		FROM errors
+		WHERE app_id = $1 AND fingerprint = $2
+		ORDER BY created_at DESC
+	`, appID, fingerprint)
 	if err != nil {
 		return nil, err
 	}
@@ -201,27 +203,27 @@ func (r *LogRepository) GetErrorDetailsByFingerprint(ctx context.Context, finger
 	return details, nil
 }
 
-func (r *LogRepository) UpdateErrorTrends(ctx context.Context, errorType string) error {
+func (r *LogRepository) UpdateErrorTrends(ctx context.Context, appID, errorType string) error {
 	now := time.Now()
 	hourStart := now.Truncate(time.Hour)
 	dayStart := now.Truncate(24 * time.Hour)
 
 	_, err := db.DB.Exec(ctx, `
-		INSERT INTO error_trends (error_type, interval_start, interval_type, count)
-		VALUES ($1, $2, 'hourly', 1)
-		ON CONFLICT (error_type, interval_start, interval_type) 
+		INSERT INTO error_trends (app_id, error_type, interval_start, interval_type, count)
+		VALUES ($1, $2, $3, 'hourly', 1)
+		ON CONFLICT (app_id, error_type, interval_start, interval_type) 
 		DO UPDATE SET count = error_trends.count + 1
-	`, errorType, hourStart)
+	`, appID, errorType, hourStart)
 	if err != nil {
 		return err
 	}
 
 	_, err = db.DB.Exec(ctx, `
-		INSERT INTO error_trends (error_type, interval_start, interval_type, count)
-		VALUES ($1, $2, 'daily', 1)
-		ON CONFLICT (error_type, interval_start, interval_type) 
+		INSERT INTO error_trends (app_id, error_type, interval_start, interval_type, count)
+		VALUES ($1, $2, $3, 'daily', 1)
+		ON CONFLICT (app_id, error_type, interval_start, interval_type) 
 		DO UPDATE SET count = error_trends.count + 1
-	`, errorType, dayStart)
+	`, appID, errorType, dayStart)
 	return err
 }
 
@@ -230,15 +232,15 @@ type TrendData struct {
 	Count         int       `json:"count"`
 }
 
-func (r *LogRepository) GetErrorTrends(ctx context.Context, errorType string, intervalType string, hours int) ([]TrendData, error) {
+func (r *LogRepository) GetErrorTrends(ctx context.Context, appID, errorType, intervalType string, hours int) ([]TrendData, error) {
 	since := time.Now().Add(-time.Duration(hours) * time.Hour)
 
 	rows, err := db.DB.Query(ctx, `
 		SELECT interval_start, count
 		FROM error_trends
-		WHERE error_type = $1 AND interval_type = $2 AND interval_start >= $3
+		WHERE app_id = $1 AND error_type = $2 AND interval_type = $3 AND interval_start >= $4
 		ORDER BY interval_start ASC
-	`, errorType, intervalType, since)
+	`, appID, errorType, intervalType, since)
 	if err != nil {
 		return nil, err
 	}
@@ -255,15 +257,15 @@ func (r *LogRepository) GetErrorTrends(ctx context.Context, errorType string, in
 	return trends, nil
 }
 
-func (r *LogRepository) GetAllErrorTrends(ctx context.Context, intervalType string, hours int) ([]map[string]interface{}, error) {
+func (r *LogRepository) GetAllErrorTrends(ctx context.Context, appID, intervalType string, hours int) ([]map[string]interface{}, error) {
 	since := time.Now().Add(-time.Duration(hours) * time.Hour)
 
 	rows, err := db.DB.Query(ctx, `
 		SELECT error_type, interval_start, count
 		FROM error_trends
-		WHERE interval_type = $1 AND interval_start >= $2
+		WHERE app_id = $1 AND interval_type = $2 AND interval_start >= $3
 		ORDER BY error_type, interval_start ASC
-	`, intervalType, since)
+	`, appID, intervalType, since)
 	if err != nil {
 		return nil, err
 	}

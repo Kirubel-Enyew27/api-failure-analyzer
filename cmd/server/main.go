@@ -46,6 +46,8 @@ func main() {
 	rateLimiter := middleware.NewRateLimiter(100, 200, time.Minute)
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("/apps", logHandler.CreateApp)
+	mux.HandleFunc("/apps/list", logHandler.ListApps)
 	mux.HandleFunc("/logs", logHandler.SubmitLog)
 	mux.HandleFunc("/errors/summary-time", logHandler.GetErrorSummaryByTime)
 	mux.HandleFunc("/errors/top-limit", logHandler.GetTopErrorsWithLimit)
@@ -55,7 +57,8 @@ func main() {
 	mux.HandleFunc("/errors/severity/all", logHandler.GetAllErrorsGroupedBySeverity)
 	mux.Handle("/metrics", promhttp.Handler())
 
-	handler := middleware.RateLimiterMiddleware(rateLimiter)(mux)
+	handler := middleware.APIKeyMiddleware(mux)
+	handler = middleware.RateLimiterMiddleware(rateLimiter)(handler)
 	handler = middleware.LoggingMiddleware(handler)
 
 	srv := &http.Server{
