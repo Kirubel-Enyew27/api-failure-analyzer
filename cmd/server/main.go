@@ -1,6 +1,7 @@
 package main
 
 import (
+	"api-failure-analyzer/internal/alert"
 	"api-failure-analyzer/internal/db"
 	"api-failure-analyzer/internal/handler"
 	"api-failure-analyzer/internal/logger"
@@ -12,6 +13,8 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -27,6 +30,18 @@ func main() {
 	repo := repository.NewLogRepository()
 	logService := service.NewLogService(repo)
 	logHandler := handler.NewHandler(logService)
+
+	alertCfg := alert.Config{
+		SMTPHost:     os.Getenv("SMTP_HOST"),
+		SMTPPort:     mustGetInt("SMTP_PORT", 587),
+		SMTPUser:     os.Getenv("SMTP_USER"),
+		SMTPPassword: os.Getenv("SMTP_PASSWORD"),
+		FromEmail:    os.Getenv("ALERT_FROM_EMAIL"),
+		ToEmails:     parseEmails(os.Getenv("ALERT_TO_EMAILS")),
+		Enabled:      os.Getenv("ALERT_ENABLED") == "true",
+	}
+	notifier := alert.NewNotifier(alertCfg)
+	notifier.Start(context.Background())
 
 	rateLimiter := middleware.NewRateLimiter(100, 200, time.Minute)
 
@@ -73,4 +88,34 @@ func main() {
 	}
 
 	log.Info("Server exiting")
+}
+
+func mustGetInt(key string, def int) int {
+	if v := os.Getenv(key); v != "" {
+		if i, err := strconv.Atoi(v); err == nil {
+			return i
+		}
+	}
+	return def
+}
+
+func parseEmails(s string) []string {
+	if s == "" {
+		return nil
+	}
+	var emails []string
+	for _, e := range splitAndTrim(s, ",") {
+		if e != "" {
+			emails = append(emails, e)
+		}
+	}
+	return emails
+}
+
+func splitAndTrim(s, sep string) []string {
+	var result []string
+	for _, part := range strings.Split(s, sep) {
+		result = append(result, strings.TrimSpace(part))
+	}
+	return result
 }
