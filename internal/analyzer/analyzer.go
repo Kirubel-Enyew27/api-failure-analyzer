@@ -7,21 +7,77 @@ import (
 	"strings"
 )
 
+type Severity string
+
+const (
+	SeverityLow      Severity = "low"
+	SeverityMedium   Severity = "medium"
+	SeverityHigh     Severity = "high"
+	SeverityCritical Severity = "critical"
+)
+
 type Result struct {
 	ErrorMessage string
 	ErrorType    string
 	Fingerprint  string
+	Severity     Severity
 }
 
-func AnalyzeLog(log string) Result {
+func AnalyzeLog(log string, count int) Result {
 	msg := extractError(log)
 	typ := classifyError(msg)
 	fp := fingerprint(msg)
+
+	sev := classifySeverity(typ, count)
 
 	return Result{
 		ErrorMessage: msg,
 		ErrorType:    typ,
 		Fingerprint:  fp,
+		Severity:     sev,
+	}
+}
+
+func classifySeverity(errorType string, count int) Severity {
+	base := getBaseSeverity(errorType)
+
+	switch {
+	case count >= 100:
+		if base < SeverityHigh {
+			return SeverityHigh
+		}
+		return SeverityCritical
+	case count >= 50:
+		if base < SeverityMedium {
+			return SeverityMedium
+		}
+		return SeverityHigh
+	case count >= 10:
+		if base == SeverityLow {
+			return SeverityMedium
+		}
+		return base
+	default:
+		return base
+	}
+}
+
+func getBaseSeverity(errorType string) Severity {
+	switch errorType {
+	case "timeout_error":
+		return SeverityMedium
+	case "connection_error":
+		return SeverityMedium
+	case "nil_pointer":
+		return SeverityHigh
+	case "auth_error":
+		return SeverityHigh
+	case "out_of_memory":
+		return SeverityCritical
+	case "disk_full":
+		return SeverityCritical
+	default:
+		return SeverityLow
 	}
 }
 

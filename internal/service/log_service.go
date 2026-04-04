@@ -20,8 +20,10 @@ func NewLogService(repo *repository.LogRepository) *LogService {
 
 func (s *LogService) ProcessLog(ctx context.Context, raw string) error {
 	start := time.Now()
-	res := analyzer.AnalyzeLog(raw)
-	err := s.repo.ProcessLogWithTx(ctx, raw, res.ErrorMessage, res.ErrorType, res.Fingerprint)
+
+	count, _ := s.repo.GetClusterCount(ctx)
+	res := analyzer.AnalyzeLog(raw, count)
+	err := s.repo.ProcessLogWithTx(ctx, raw, res.ErrorMessage, res.ErrorType, res.Fingerprint, string(res.Severity))
 
 	metrics.ProcessedLogs.Inc()
 	if res.ErrorType != "" {
@@ -29,8 +31,7 @@ func (s *LogService) ProcessLog(ctx context.Context, raw string) error {
 		s.repo.UpdateErrorTrends(ctx, res.ErrorType)
 	}
 
-	count, _ := s.repo.GetClusterCount(ctx)
-	metrics.ClusterCount.Set(float64(count))
+	metrics.ClusterCount.Set(float64(count + 1))
 
 	metrics.ProcessingDuration.Observe(time.Since(start).Seconds())
 
@@ -55,4 +56,12 @@ func (s *LogService) GetErrorTrends(ctx context.Context, errorType string, inter
 
 func (s *LogService) GetAllErrorTrends(ctx context.Context, intervalType string, hours int) ([]map[string]interface{}, error) {
 	return s.repo.GetAllErrorTrends(ctx, intervalType, hours)
+}
+
+func (s *LogService) GetErrorsBySeverity(ctx context.Context, severity string) ([]map[string]interface{}, error) {
+	return s.repo.GetErrorsBySeverity(ctx, severity)
+}
+
+func (s *LogService) GetAllErrorsGroupedBySeverity(ctx context.Context) (map[string][]map[string]interface{}, error) {
+	return s.repo.GetAllErrorsGroupedBySeverity(ctx)
 }

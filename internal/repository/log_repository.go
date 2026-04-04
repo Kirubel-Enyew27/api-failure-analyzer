@@ -18,7 +18,7 @@ func (r *LogRepository) GetClusterCount(ctx context.Context) (int, error) {
 	return count, err
 }
 
-func (r *LogRepository) ProcessLogWithTx(ctx context.Context, raw, msg, typ, fp string) error {
+func (r *LogRepository) ProcessLogWithTx(ctx context.Context, raw, msg, typ, fp, severity string) error {
 	tx, err := db.DB.Begin(ctx)
 	if err != nil {
 		return err
@@ -37,10 +37,10 @@ func (r *LogRepository) ProcessLogWithTx(ctx context.Context, raw, msg, typ, fp 
 	}
 
 	_, err = tx.Exec(ctx, `
-		INSERT INTO clusters (fingerprint, error_type, count)
-		VALUES ($1, $2, 1)
-		ON CONFLICT (fingerprint) DO UPDATE SET count = clusters.count + 1, last_seen = NOW()
-	`, fp, typ)
+		INSERT INTO clusters (fingerprint, error_type, count, severity)
+		VALUES ($1, $2, 1, $3)
+		ON CONFLICT (fingerprint) DO UPDATE SET count = clusters.count + 1, last_seen = NOW(), severity = $3
+	`, fp, typ, severity)
 	if err != nil {
 		return err
 	}
@@ -103,6 +103,73 @@ func (r *LogRepository) GetTopErrorsWithLimit(ctx context.Context, limit int) ([
 		})
 	}
 	return results, nil
+}
+
+func (r *LogRepository) GetErrorsBySeverity(ctx context.Context, severity string) ([]map[string]interface{}, error) {
+	rows, err := db.DB.Query(ctx, `
+		SELECT fingerprint, error_type, count, last_seen, severity
+		FROM clusters
+		WHERE severity = $1
+		ORDER BY count DESC
+	`, severity)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []map[string]interface{}
+	for rows.Next() {
+		var fp, typ, sev string
+		var count int
+		var lastSeen time.Time
+		if err := rows.Scan(&fp, &typ, &count, &lastSeen, &sev); err != nil {
+			return nil, err
+		}
+		results = append(results, map[string]interface{}{
+			"fingerprint": fp,
+			"error_type":  typ,
+			"count":       count,
+			"last_seen":   lastSeen,
+			"severity":    sev,
+		})
+	}
+	return results, nil
+}
+
+func (r *LogRepository) GetAllErrorsGroupedBySeverity(ctx context.Context) (map[string][]map[string]interface{}, error) {
+	rows, err := db.DB.Query(ctx, `
+		SELECT fingerprint, error_type, count, last_seen, severity
+		FROM clusters
+		ORDER BY severity DESC, count DESC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := map[string][]map[string]interface{}{
+		"critical": {},
+		"high":     {},
+		"medium":   {},
+		"low":      {},
+	}
+
+	for rows.Next() {
+		var fp, typ, sev string
+		var count int
+		var lastSeen time.Time
+		if err := rows.Scan(&fp, &typ, &count, &lastSeen, &sev); err != nil {
+			return nil, err
+		}
+		result[sev] = append(result[sev], map[string]interface{}{
+			"fingerprint": fp,
+			"error_type":  typ,
+			"count":       count,
+			"last_seen":   lastSeen,
+			"severity":    sev,
+		})
+	}
+	return result, nil
 }
 
 func (r *LogRepository) GetErrorDetailsByFingerprint(ctx context.Context, fingerprint string) ([]map[string]interface{}, error) {

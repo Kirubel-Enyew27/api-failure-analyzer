@@ -124,3 +124,31 @@ func (h *Handler) GetErrorTrends(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(trends)
 }
+
+func (h *Handler) GetErrorsBySeverity(w http.ResponseWriter, r *http.Request) {
+	severity := r.URL.Query().Get("severity")
+	if severity == "" {
+		http.Error(w, "missing severity", http.StatusBadRequest)
+		return
+	}
+
+	errors, err := h.service.GetErrorsBySeverity(r.Context(), severity)
+	if err != nil {
+		http.Error(w, "failed to get errors by severity", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(errors)
+}
+
+func (h *Handler) GetAllErrorsGroupedBySeverity(w http.ResponseWriter, r *http.Request) {
+	errors, err := h.service.GetAllErrorsGroupedBySeverity(r.Context())
+	if err != nil {
+		http.Error(w, "failed to get errors grouped by severity", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(errors)
+}
