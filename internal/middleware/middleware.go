@@ -1,7 +1,7 @@
 package middleware
 
 import (
-	"log"
+	"api-failure-analyzer/internal/logger"
 	"net/http"
 	"sync"
 	"time"
@@ -92,7 +92,12 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 		start := time.Now()
 		wrapped := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
 		next.ServeHTTP(wrapped, r)
-		log.Printf("%s %s %s %d %v", r.Method, r.URL.Path, r.RemoteAddr, wrapped.statusCode, time.Since(start))
+		logger.Get().Infow("request completed",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"remote_addr", r.RemoteAddr,
+			"status", wrapped.statusCode,
+			"duration", time.Since(start))
 	})
 }
 
