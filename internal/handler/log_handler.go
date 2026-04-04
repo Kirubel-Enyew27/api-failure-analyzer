@@ -91,3 +91,36 @@ func (h *Handler) GetErrorDetailsByFingerprint(w http.ResponseWriter, r *http.Re
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(details)
 }
+
+func (h *Handler) GetErrorTrends(w http.ResponseWriter, r *http.Request) {
+	errorType := r.URL.Query().Get("error_type")
+	intervalType := r.URL.Query().Get("interval")
+	hoursStr := r.URL.Query().Get("hours")
+
+	if intervalType == "" {
+		intervalType = "daily"
+	}
+	if hoursStr == "" {
+		hoursStr = "168"
+	}
+
+	hours, err := strconv.Atoi(hoursStr)
+	if err != nil {
+		http.Error(w, "invalid hours", http.StatusBadRequest)
+		return
+	}
+
+	var trends interface{}
+	if errorType == "" {
+		trends, err = h.service.GetAllErrorTrends(r.Context(), intervalType, hours)
+	} else {
+		trends, err = h.service.GetErrorTrends(r.Context(), errorType, intervalType, hours)
+	}
+	if err != nil {
+		http.Error(w, "failed to get error trends", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(trends)
+}

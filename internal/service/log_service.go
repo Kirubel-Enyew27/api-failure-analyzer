@@ -26,6 +26,7 @@ func (s *LogService) ProcessLog(ctx context.Context, raw string) error {
 	metrics.ProcessedLogs.Inc()
 	if res.ErrorType != "" {
 		metrics.ErrorCount.WithLabelValues(res.ErrorType).Inc()
+		s.repo.UpdateErrorTrends(ctx, res.ErrorType)
 	}
 
 	count, _ := s.repo.GetClusterCount(ctx)
@@ -46,4 +47,12 @@ func (s *LogService) GetTopErrorsWithLimit(ctx context.Context, limit int) ([]ma
 
 func (s *LogService) GetErrorDetailsByFingerprint(ctx context.Context, fingerprint string) ([]map[string]interface{}, error) {
 	return s.repo.GetErrorDetailsByFingerprint(ctx, fingerprint)
+}
+
+func (s *LogService) GetErrorTrends(ctx context.Context, errorType string, intervalType string, hours int) ([]repository.TrendData, error) {
+	return s.repo.GetErrorTrends(ctx, errorType, intervalType, hours)
+}
+
+func (s *LogService) GetAllErrorTrends(ctx context.Context, intervalType string, hours int) ([]map[string]interface{}, error) {
+	return s.repo.GetAllErrorTrends(ctx, intervalType, hours)
 }

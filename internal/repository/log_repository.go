@@ -133,3 +133,87 @@ func (r *LogRepository) GetErrorDetailsByFingerprint(ctx context.Context, finger
 	}
 	return details, nil
 }
+
+func (r *LogRepository) UpdateErrorTrends(ctx context.Context, errorType string) error {
+	now := time.Now()
+	hourStart := now.Truncate(time.Hour)
+	dayStart := now.Truncate(24 * time.Hour)
+
+	_, err := db.DB.Exec(ctx, `
+		INSERT INTO error_trends (error_type, interval_start, interval_type, count)
+		VALUES ($1, $2, 'hourly', 1)
+		ON CONFLICT (error_type, interval_start, interval_type) 
+		DO UPDATE SET count = error_trends.count + 1
+	`, errorType, hourStart)
+	if err != nil {
+		return err
+	}
+
+	_, err = db.DB.Exec(ctx, `
+		INSERT INTO error_trends (error_type, interval_start, interval_type, count)
+		VALUES ($1, $2, 'daily', 1)
+		ON CONFLICT (error_type, interval_start, interval_type) 
+		DO UPDATE SET count = error_trends.count + 1
+	`, errorType, dayStart)
+	return err
+}
+
+type TrendData struct {
+	IntervalStart time.Time `json:"interval_start"`
+	Count         int       `json:"count"`
+}
+
+func (r *LogRepository) GetErrorTrends(ctx context.Context, errorType string, intervalType string, hours int) ([]TrendData, error) {
+	since := time.Now().Add(-time.Duration(hours) * time.Hour)
+
+	rows, err := db.DB.Query(ctx, `
+		SELECT interval_start, count
+		FROM error_trends
+		WHERE error_type = $1 AND interval_type = $2 AND interval_start >= $3
+		ORDER BY interval_start ASC
+	`, errorType, intervalType, since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var trends []TrendData
+	for rows.Next() {
+		var td TrendData
+		if err := rows.Scan(&td.IntervalStart, &td.Count); err != nil {
+			return nil, err
+		}
+		trends = append(trends, td)
+	}
+	return trends, nil
+}
+
+func (r *LogRepository) GetAllErrorTrends(ctx context.Context, intervalType string, hours int) ([]map[string]interface{}, error) {
+	since := time.Now().Add(-time.Duration(hours) * time.Hour)
+
+	rows, err := db.DB.Query(ctx, `
+		SELECT error_type, interval_start, count
+		FROM error_trends
+		WHERE interval_type = $1 AND interval_start >= $2
+		ORDER BY error_type, interval_start ASC
+	`, intervalType, since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	results := make([]map[string]interface{}, 0)
+	for rows.Next() {
+		var typ string
+		var td TrendData
+		if err := rows.Scan(&typ, &td.IntervalStart, &td.Count); err != nil {
+			return nil, err
+		}
+		results = append(results, map[string]interface{}{
+			"error_type":     typ,
+			"interval_start": td.IntervalStart,
+			"count":          td.Count,
+		})
+	}
+	return results, nil
+}

@@ -35,6 +35,7 @@ func main() {
 	mux.HandleFunc("/errors/summary-time", logHandler.GetErrorSummaryByTime)
 	mux.HandleFunc("/errors/top-limit", logHandler.GetTopErrorsWithLimit)
 	mux.HandleFunc("/errors/details-fp", logHandler.GetErrorDetailsByFingerprint)
+	mux.HandleFunc("/errors/trends", logHandler.GetErrorTrends)
 	mux.Handle("/metrics", promhttp.Handler())
 
 	handler := middleware.RateLimiterMiddleware(rateLimiter)(mux)
