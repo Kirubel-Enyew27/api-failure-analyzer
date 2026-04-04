@@ -3,6 +3,7 @@ package main
 import (
 	"api-failure-analyzer/internal/db"
 	"api-failure-analyzer/internal/handler"
+	"api-failure-analyzer/internal/middleware"
 	"api-failure-analyzer/internal/repository"
 	"api-failure-analyzer/internal/service"
 	"context"
@@ -21,14 +22,20 @@ func main() {
 	logService := service.NewLogService(repo)
 	logHandler := handler.NewHandler(logService)
 
-	http.HandleFunc("/logs", logHandler.SubmitLog)
-	http.HandleFunc("/errors/summary-time", logHandler.GetErrorSummaryByTime)
-	http.HandleFunc("/errors/top-limit", logHandler.GetTopErrorsWithLimit)
-	http.HandleFunc("/errors/details-fp", logHandler.GetErrorDetailsByFingerprint)
+	rateLimiter := middleware.NewRateLimiter(100, 200, time.Minute)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/logs", logHandler.SubmitLog)
+	mux.HandleFunc("/errors/summary-time", logHandler.GetErrorSummaryByTime)
+	mux.HandleFunc("/errors/top-limit", logHandler.GetTopErrorsWithLimit)
+	mux.HandleFunc("/errors/details-fp", logHandler.GetErrorDetailsByFingerprint)
+
+	handler := middleware.RateLimiterMiddleware(rateLimiter)(mux)
+	handler = middleware.LoggingMiddleware(handler)
 
 	srv := &http.Server{
 		Addr:    ":8080",
-		Handler: nil, 
+		Handler: handler,
 	}
 
 	go func() {
@@ -37,7 +44,6 @@ func main() {
 			log.Fatalf("listen: %s\n", err)
 		}
 	}()
-
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
