@@ -3,9 +3,12 @@ package service
 import (
 	"api-failure-analyzer/internal/analyzer"
 	"api-failure-analyzer/internal/metrics"
+	"api-failure-analyzer/internal/observability"
 	"api-failure-analyzer/internal/repository"
 	"context"
 	"time"
+
+	"go.opentelemetry.io/otel/attribute"
 )
 
 type LogService struct {
@@ -19,6 +22,11 @@ func NewLogService(repo *repository.LogRepository) *LogService {
 }
 
 func (s *LogService) ProcessLog(ctx context.Context, appID, raw string) error {
+	ctx, span := observability.StartSpan(ctx, "log-service", "service.process_log",
+		attribute.String("app.id", appID),
+	)
+	defer span.End()
+
 	start := time.Now()
 
 	count, _ := s.repo.GetClusterCount(ctx, appID)
@@ -28,12 +36,20 @@ func (s *LogService) ProcessLog(ctx context.Context, appID, raw string) error {
 	metrics.ProcessedLogs.Inc()
 	if res.ErrorType != "" {
 		metrics.ErrorCount.WithLabelValues(res.ErrorType).Inc()
-		s.repo.UpdateErrorTrends(ctx, appID, res.ErrorType)
+		if trendErr := s.repo.UpdateErrorTrends(ctx, appID, res.ErrorType); trendErr != nil {
+			observability.MarkSpanError(span, trendErr)
+		}
+	}
+	if res.Severity == analyzer.SeverityHigh || res.Severity == analyzer.SeverityCritical {
+		metrics.AnomalyCount.WithLabelValues("api-failure-analyzer", string(res.Severity)).Inc()
 	}
 
 	metrics.ClusterCount.Set(float64(count + 1))
-
 	metrics.ProcessingDuration.Observe(time.Since(start).Seconds())
+	if err != nil {
+		metrics.FailureFrequency.WithLabelValues("api-failure-analyzer", "process_log").Inc()
+		observability.MarkSpanError(span, err)
+	}
 
 	return err
 }

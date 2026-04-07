@@ -6,6 +6,7 @@ import (
 	"api-failure-analyzer/internal/handler"
 	"api-failure-analyzer/internal/logger"
 	"api-failure-analyzer/internal/middleware"
+	"api-failure-analyzer/internal/observability"
 	"api-failure-analyzer/internal/repository"
 	"api-failure-analyzer/internal/retention"
 	"api-failure-analyzer/internal/service"
@@ -27,6 +28,16 @@ func main() {
 	defer logger.Sync()
 
 	log.Info("Starting server")
+
+	shutdownTracing, err := observability.InitTracing(context.Background())
+	if err != nil {
+		log.Fatalw("failed to initialize tracing", "error", err)
+	}
+	defer func() {
+		if err := shutdownTracing(context.Background()); err != nil {
+			log.Errorw("failed to shutdown tracing", "error", err)
+		}
+	}()
 
 	repo := repository.NewLogRepository()
 	logService := service.NewLogService(repo)
@@ -67,13 +78,16 @@ func main() {
 	mux.HandleFunc("/errors/severity/all", logHandler.GetAllErrorsGroupedBySeverity)
 	mux.Handle("/metrics", promhttp.Handler())
 
-	handler := middleware.APIKeyMiddleware(mux)
-	handler = middleware.RateLimiterMiddleware(rateLimiter)(handler)
-	handler = middleware.LoggingMiddleware(handler)
+	var h http.Handler = mux
+	h = middleware.APIKeyMiddleware(h)
+	h = middleware.RateLimiterMiddleware(rateLimiter)(h)
+	h = middleware.LoggingMiddleware(h)
+	h = middleware.TracingMiddleware(h)
+	h = middleware.CorrelationIDMiddleware(h)
 
 	srv := &http.Server{
 		Addr:    ":8080",
-		Handler: handler,
+		Handler: h,
 	}
 
 	go func() {
