@@ -10,14 +10,16 @@ import (
 var log *zap.SugaredLogger
 
 func Init(production bool) {
-	var cfg zap.Config
-	if production {
-		cfg = zap.NewProductionConfig()
-	} else {
-		cfg = zap.NewDevelopmentConfig()
-		cfg.EncoderConfig.TimeKey = "timestamp"
-		cfg.EncoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder
+
+	cfg := zap.NewProductionConfig()
+	cfg.Encoding = "json"
+	cfg.EncoderConfig.TimeKey = "timestamp"
+	cfg.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
+	if !production {
+		cfg.Level = zap.NewAtomicLevelAt(zap.DebugLevel)
+		cfg.EncoderConfig.EncodeLevel = zapcore.LowercaseLevelEncoder
 	}
+
 
 	cfg.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
 

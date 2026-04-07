@@ -6,6 +6,25 @@ import (
 )
 
 var (
+	APILatency = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "api_latency",
+		Help:    "Latency of API requests in seconds",
+		Buckets: prometheus.DefBuckets,
+	}, []string{"service", "method", "path", "status"})
+	ErrorRateByService = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "error_rate_by_service",
+		Help: "Number of error responses by service and status class",
+	}, []string{"service", "status_class"})
+	FailureFrequency = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "failure_frequency",
+		Help: "Count of failures by service and kind",
+	}, []string{"service", "kind"})
+
+	AnomalyCount = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "anomaly_count",
+		Help: "Count of detected anomalies by service and severity",
+	}, []string{"service", "severity"})
+	
 	ProcessedLogs = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "api_failure_analyzer_logs_processed_total",
 		Help: "Total number of logs processed",

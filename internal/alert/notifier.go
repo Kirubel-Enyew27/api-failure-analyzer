@@ -8,6 +8,10 @@ import (
 
 	"api-failure-analyzer/internal/db"
 	"api-failure-analyzer/internal/logger"
+	"api-failure-analyzer/internal/metrics"
+	"api-failure-analyzer/internal/observability"
+
+	"go.opentelemetry.io/otel/attribute"
 
 	"gopkg.in/gomail.v2"
 )
@@ -94,12 +98,17 @@ func (n *Notifier) checkAlerts(ctx context.Context) {
 		}
 
 		if count >= rule.Threshold && n.shouldRecordAndAlert(rule.Severity, rule.Cooldown) {
-			n.sendAlert(rule.Severity, count, rule.Window)
+			n.sendAlert(ctx, rule.Severity, count, rule.Window)
 		}
 	}
 }
 
 func (n *Notifier) getErrorCountSince(ctx context.Context, severity string, window time.Duration) (int, error) {
+    ctx, span := observability.StartSpan(ctx, "alert-notifier", "db.get_error_count_since",
+		attribute.String("error.severity", severity),
+ )
+ defer span.End()
+
 	since := time.Now().Add(-window)
 	var count int
 	err := db.DB.QueryRow(ctx, `
@@ -107,6 +116,7 @@ func (n *Notifier) getErrorCountSince(ctx context.Context, severity string, wind
 		FROM clusters
 		WHERE severity = $1 AND last_seen >= $2
 	`, severity, since).Scan(&count)
+	observability.MarkSpanError(span, err)
 	return count, err
 }
 
@@ -140,7 +150,13 @@ func (n *Notifier) shouldRecordAndAlert(severity string, cooldown time.Duration)
 	return true
 }
 
-func (n *Notifier) sendAlert(severity string, count int, window time.Duration) {
+func (n *Notifier) sendAlert(ctx context.Context, severity string, count int, window time.Duration) {
+	ctx, span := observability.StartSpan(ctx, "alert-notifier", "external.smtp_send",
+		attribute.String("external.system", "smtp"),
+		attribute.String("error.severity", severity),
+	)
+	defer span.End()
+
 	if len(n.cfg.ToEmails) == 0 {
 		return
 	}
@@ -161,6 +177,8 @@ func (n *Notifier) sendAlert(severity string, count int, window time.Duration) {
 	d := gomail.NewDialer(n.cfg.SMTPHost, n.cfg.SMTPPort, n.cfg.SMTPUser, n.cfg.SMTPPassword)
 
 	if err := d.DialAndSend(m); err != nil {
+		observability.MarkSpanError(span, err)
+		metrics.FailureFrequency.WithLabelValues("api_failure_analyzer", "external_call").Inc()
 		logger.Get().Errorw("failed to send alert email", "error", err)
 	} else {
 		logger.Get().Infow("alert email sent", "severity", severity, "count", count)
