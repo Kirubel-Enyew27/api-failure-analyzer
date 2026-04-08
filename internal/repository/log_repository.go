@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"api-failure-analyzer/internal/analyzer"
 	"api-failure-analyzer/internal/db"
 	"api-failure-analyzer/internal/observability"
 	"context"
@@ -298,12 +299,118 @@ type TrendData struct {
 	Count         int       `json:"count"`
 }
 
+func (r *LogRepository) GetRecentErrorEvents(ctx context.Context, appID string, hours, limit int) ([]analyzer.ErrorEvent, error) {
+	ctx, span := observability.StartSpan(ctx, "log-repository", "db.get_recent_error_events",
+		attribute.String("app.id", appID),
+	)
+	defer span.End()
+
+	if hours <= 0 {
+		hours = 168
+	}
+	if limit <= 0 {
+		limit = 1000
+	}
+
+	since := time.Now().Add(-time.Duration(hours) * time.Hour)
+	rows, err := db.DB.Query(ctx, `
+		SELECT e.fingerprint, e.error_type, e.error_message, l.raw_text, e.created_at
+		FROM errors e
+		INNER JOIN logs l ON l.id = e.log_id
+		WHERE e.app_id = $1 AND e.created_at >= $2
+		ORDER BY e.created_at DESC
+		LIMIT $3
+	`, appID, since, limit)
+	if err != nil {
+		observability.MarkSpanError(span, err)
+		return nil, err
+	}
+	defer rows.Close()
+
+	events := make([]analyzer.ErrorEvent, 0)
+	for rows.Next() {
+		var ev analyzer.ErrorEvent
+		if err := rows.Scan(&ev.FingerPrint, &ev.ErrorType, &ev.ErrorMessage, &ev.RawText, &ev.CreatedAt); err != nil {
+			observability.MarkSpanError(span, err)
+			return nil, err
+		}
+		events = append(events, ev)
+	}
+	return events, nil
+}
+
+func (r *LogRepository) GetHourlyTrendPoints(ctx context.Context, appID string, hours int) ([]analyzer.TrendPoint, error) {
+	ctx, span := observability.StartSpan(ctx, "log-repository", "db.get_hourly_trend_points",
+		attribute.String("app.id", appID),
+	)
+	defer span.End()
+
+	if hours <= 0 {
+		hours = 168
+	}
+	since := time.Now().Add(-time.Duration(hours) * time.Hour)
+
+	rows, err := db.DB.Query(ctx, `
+		SELECT error_type, interval_start, count
+		FROM error_trends
+		WHERE app_id = $1 AND interval_type = 'hourly' AND interval_start >= $2
+		ORDER BY error_type, interval_start ASC
+	`, appID, since)
+	if err != nil {
+		observability.MarkSpanError(span, err)
+		return nil, err
+	}
+	defer rows.Close()
+
+	points := make([]analyzer.TrendPoint, 0)
+	for rows.Next() {
+		var p analyzer.TrendPoint
+		if err := rows.Scan(&p.ErrorType, &p.IntervalStart, &p.Count); err != nil {
+			observability.MarkSpanError(span, err)
+			return nil, err
+		}
+		points = append(points, p)
+	}
+	return points, nil
+}
+
+func (r *LogRepository) GetErrorCountsInRange(ctx context.Context, appID string, start, end time.Time) (map[string]int, error) {
+	ctx, span := observability.StartSpan(ctx, "log-repository", "db.get_error_counts_in_range",
+		attribute.String("app.id", appID),
+	)
+	defer span.End()
+
+	rows, err := db.DB.Query(ctx, `
+		SELECT error_type, COUNT(*)
+		FROM errors
+		WHERE app_id = $1 AND created_at >= $2 AND created_at < $3
+		GROUP BY error_type
+	`, appID, start, end)
+	if err != nil {
+		observability.MarkSpanError(span, err)
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make(map[string]int)
+	for rows.Next() {
+		var errorType string
+		var count int
+		if err := rows.Scan(&errorType, &count); err != nil {
+			observability.MarkSpanError(span, err)
+			return nil, err
+		}
+		out[errorType] = count
+	}
+	return out, nil
+}
+
 func (r *LogRepository) GetErrorTrends(ctx context.Context, appID, errorType, intervalType string, hours int) ([]TrendData, error) {
 	ctx, span := observability.StartSpan(ctx, "log-repository", "db.get_error_trends",
-	attribute.String("app_id", appID),
-	attribute.String("error_type", errorType),
-	attribute.String("interval_type", intervalType),
-)
+		attribute.String("app_id", appID),
+		attribute.String("error_type", errorType),
+		attribute.String("interval_type", intervalType),
+	)
 	defer span.End()
 
 	since := time.Now().Add(-time.Duration(hours) * time.Hour)
@@ -334,9 +441,9 @@ func (r *LogRepository) GetErrorTrends(ctx context.Context, appID, errorType, in
 
 func (r *LogRepository) GetAllErrorTrends(ctx context.Context, appID, intervalType string, hours int) ([]map[string]interface{}, error) {
 	ctx, span := observability.StartSpan(ctx, "log-repository", "db.get_all_error_trends",
-	attribute.String("app_id", appID),
-	attribute.String("interval.type", intervalType),
-)
+		attribute.String("app_id", appID),
+		attribute.String("interval.type", intervalType),
+	)
 	defer span.End()
 
 	since := time.Now().Add(-time.Duration(hours) * time.Hour)
