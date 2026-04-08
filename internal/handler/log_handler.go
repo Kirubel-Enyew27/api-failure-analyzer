@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"time"
 )
 
 type Handler struct {
@@ -193,6 +194,53 @@ func (h *Handler) GetAllErrorsGroupedBySeverity(w http.ResponseWriter, r *http.R
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(errors)
+}
+
+func (h *Handler) GetIntelligentFailureAnalysis(w http.ResponseWriter, r *http.Request) {
+	appID := r.Context().Value("app_id")
+	if appID == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	hours := 168
+	if hoursStr := r.URL.Query().Get("hours"); hoursStr != "" {
+		parsed, err := strconv.Atoi(hoursStr)
+		if err != nil || parsed <= 0 {
+			http.Error(w, "invalid hours", http.StatusBadRequest)
+			return
+		}
+		hours = parsed
+	}
+
+	limit := 1000
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		parsed, err := strconv.Atoi(limitStr)
+		if err != nil || parsed <= 0 {
+			http.Error(w, "invalid limit", http.StatusBadRequest)
+			return
+		}
+		limit = parsed
+	}
+
+	var deployAt *time.Time
+	if deployAtStr := r.URL.Query().Get("deploy_at"); deployAtStr != "" {
+		parsed, err := time.Parse(time.RFC3339, deployAtStr)
+		if err != nil {
+			http.Error(w, "invalid deploy_at; expected RFC3339", http.StatusBadRequest)
+			return
+		}
+		deployAt = &parsed
+	}
+
+	result, err := h.service.GetIntelligentFailureAnalysis(r.Context(), appID.(string), hours, limit, deployAt)
+	if err != nil {
+		http.Error(w, "failed to get intelligent analysis", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
 }
 
 type CreateAppRequest struct {

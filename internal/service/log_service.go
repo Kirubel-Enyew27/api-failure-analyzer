@@ -81,3 +81,52 @@ func (s *LogService) GetErrorsBySeverity(ctx context.Context, appID, severity st
 func (s *LogService) GetAllErrorsGroupedBySeverity(ctx context.Context, appID string) (map[string][]map[string]interface{}, error) {
 	return s.repo.GetAllErrorsGroupedBySeverity(ctx, appID)
 }
+
+func (s *LogService) GetIntelligentFailureAnalysis(ctx context.Context, appID string, hours, limit int, deployAt *time.Time) (analyzer.IntelligentAnalysis, error) {
+	if hours <= 0 {
+		hours = 168
+	}
+	if limit <= 0 {
+		limit = 1000
+	}
+
+	events, err := s.repo.GetRecentErrorEvents(ctx, appID, hours, limit)
+	if err != nil {
+		return analyzer.IntelligentAnalysis{}, err
+	}
+
+	trendPoints, err := s.repo.GetHourlyTrendPoints(ctx, appID, hours)
+	if err != nil {
+		return analyzer.IntelligentAnalysis{}, err
+	}
+
+	beforeCounts := map[string]int{}
+	afterCounts := map[string]int{}
+	if deployAt != nil {
+		deployTS := deployAt.UTC()
+		windowStart := time.Now().UTC().Add(-time.Duration(hours) * time.Hour)
+		if deployTS.Before(windowStart) {
+			deployTS = windowStart
+		}
+		if deployTS.Before(time.Now().UTC()) {
+			beforeWindow := deployTS.Sub(windowStart)
+			if beforeWindow > 0 {
+				beforeStart := deployTS.Add(-beforeWindow)
+				beforeCounts, err = s.repo.GetErrorCountsInRange(ctx, appID, beforeStart, deployTS)
+				if err != nil {
+					return analyzer.IntelligentAnalysis{}, err
+				}
+				afterCounts, err = s.repo.GetErrorCountsInRange(ctx, appID, deployTS, deployTS.Add(beforeWindow))
+				if err != nil {
+					return analyzer.IntelligentAnalysis{}, err
+				}
+			}
+		}
+	}
+
+	result := analyzer.AnalyzeFailuresIntelligently(events, trendPoints, beforeCounts, afterCounts, analyzer.AnalysisOptions{
+		WindowHours: hours,
+		DeployAt:    deployAt,
+	})
+	return result, nil
+}
